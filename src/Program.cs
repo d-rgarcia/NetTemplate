@@ -5,6 +5,8 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
 using NetTemplateApplication.Identity;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 const string IDENTITY_DATABASE_CONNECTION = "IdentityDatabase";
 
@@ -74,6 +76,19 @@ builder.Services
         tracing.AddOtlpExporter();
     });
 
+// Values could be read from options. But for Health checks endpoint it is okay...
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter(policyName: "fixed", options =>
+    {
+        options.PermitLimit = 2;
+        options.Window = TimeSpan.FromSeconds(10);
+        options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        options.QueueLimit = 5;
+    });
+});
+
 var app = builder.Build();
 
 // Global exception handler:
@@ -95,10 +110,12 @@ app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
+app.UseRateLimiter();
 // Group identity endpoints, host/identity/login for example:
 app.MapGroup("/identity").MapIdentityApi<User>();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health")
+    .RequireRateLimiting("fixed");
 
 string[] summaries = ["Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"];
 
